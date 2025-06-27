@@ -68,7 +68,7 @@ def apply_custom_css():
         border: 2px solid #ccc !important;
         border-radius: 1px !important;
         background-color: #fff !important;
-        padding: 0.2rem !important;
+        padding: 0.8rem !important;
     }
 
 /* center everything in data tables */
