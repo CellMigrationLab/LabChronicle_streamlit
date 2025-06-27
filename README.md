@@ -2,6 +2,8 @@
 
 This repository contains the interface for our lab's reagent management platform.
 
+App deployed [here](https://labchronicle.streamlit.app/).
+
 ## 🚀 Getting Started
 
 Follow these steps to set up and run the application locally.
