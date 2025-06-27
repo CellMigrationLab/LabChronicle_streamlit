@@ -66,9 +66,10 @@ def apply_custom_css():
     input[data-baseweb="input"],
     input[type="text"], input[type="password"], textarea {
         border: 2px solid #ccc !important;
-        border-radius: 4px !important;
+        border-radius: 1px !important;
         background-color: #fff !important;
-        padding: 0.8rem !important;
+        padding: 0.2rem !important;
+        color: #333 !important; /* 
     }
 
 /* center everything in data tables */
