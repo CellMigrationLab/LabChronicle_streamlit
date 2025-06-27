@@ -343,7 +343,7 @@ if "repo_path" not in st.session_state:
             rp = clone_repo(owner, private, token)
             if rp:
                 st.session_state.repo_path = rp
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.warning("Please enter a GitHub repository URL to load the database.")
 else:
@@ -442,4 +442,4 @@ else:
         if "repo_path" in st.session_state:
             if st.button("🔁 Reset / Load another"):
                 del st.session_state.repo_path
-                st.experimental_rerun()
+                st.rerun()
