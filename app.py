@@ -76,7 +76,6 @@ def apply_custom_css():
         border: 2px solid #ccc !important;
         border-radius: 8px !important;
         background-color: #fff !important;
-        padding: 1rem !important; /* Adjusted padding slightly for better input feel */
         color: #333 !important; /* Ensure text is visible */
     }
 
