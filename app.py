@@ -1,12 +1,13 @@
+from typing import Optional, Dict, Any
+from datetime import datetime
+from pathlib import Path
 import streamlit as st
+import pandas as pd
+import urllib.parse
+import subprocess
+import tempfile
 import requests
 import yaml
-import pandas as pd
-import subprocess
-import urllib.parse
-import tempfile
-from pathlib import Path
-from typing import Optional, Dict, Any
 import html
 
 # ─── PAGE CONFIG ────────────────────────────────────────────────────────────
@@ -173,10 +174,10 @@ apply_custom_css()
 st.markdown("""
 <div class="gradient-header">
   <h1>
-    LabChronicle <span style="font-size:0.7em;font-weight:300;">| Lab Database</span>
+    LabChronicle <span style="font-size:0.7em;font-weight:300;">| Database Visualizer</span>
   </h1>
   <span style="color:#e0ecff;font-size:1.1em;">
-    🔬 All your lab reagents, in one place
+    🔬 All your lab databases (experiments, reagents, cell lines, etc.), in one place
   </span>
 </div>
 """, unsafe_allow_html=True)
@@ -202,6 +203,20 @@ DESKTOP_CONFIG = {
         "model_name", "organism", "background", "strain", "genotype",
         "source", "catalogue_number", "website", "sex", "notes"
     ],
+    "experiments": [
+        "experiment_name",
+        "date_started",
+        "performed_by",
+        "primary_method",
+        "cell_lines",
+        "animal_models",
+        "global_metadata.Microscope",
+        "global_metadata.Live Imaging",
+        "conditions",
+        "device_name",
+        "location",
+        "lab_chronicle_version"
+    ]
 }
 
 MOBILE_CONFIG = {
@@ -209,8 +224,22 @@ MOBILE_CONFIG = {
     "cell_lines":      ["cell_line_name", "modifications"],
     "plasmids":        ["plasmid_name", "location"],
     "animal_models":   ["model_name", "organism"],
+    "experiments": [
+        "experiment_name"
+        "date_started",
+        "performed_by",
+        "device_name",
+        "location",
+    ]
 }
 
+PRETTY_DATABASES = {
+    "antibodies": "Antibodies",
+    "cell_lines": "Cell Lines",
+    "plasmids": "Plasmids",
+    "animal_models": "Animal Models",
+    "experiments": "Experiments"
+}
 
 def prettify_col(col: str) -> str:
     manual = {
@@ -229,6 +258,19 @@ def prettify_col(col: str) -> str:
         "publication": "Publication DOI",
         "model_name": "Model Name",
         "catalogue_number": "Catalogue #",
+        # Experiment related
+        "experiment_name": "Experiment Name",
+        "date_started": "Start Date",
+        "performed_by": "Performed By",
+        "primary_method": "Primary Method",
+        "cell_lines": "Cell Lines",
+        "animal_models": "Animal Models",
+        "global_metadata.Microscope": "Microscope",
+        "global_metadata.Live Imaging": "Live Imaging",
+        "conditions": "Experimental Conditions",
+        "device_name": "Device Name",
+        "location": "Location",
+        "lab_chronicle_version": "LabChronicle Version",
     }
     return manual.get(col, col.replace("_", " ").title())
 
@@ -259,38 +301,102 @@ def make_all_links_clickable(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── YAML → DataFrame LOADER ─────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
-def load_dataset(dataset: str, configs_path: Path) -> pd.DataFrame:
-    folder = configs_path / dataset
-    if not folder.exists():
+def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
+    if dataset == "experiments":
+        database_folder = database_root_path / "database"
+    else:
+        database_folder = database_root_path / "configs" / dataset
+
+    print(database_folder)
+
+    if not database_folder.exists():
         return pd.DataFrame()
 
     records = []
-    for file in folder.glob("*.yaml"):
-        raw = yaml.safe_load(file.read_text()) or {}
-        if dataset == "antibodies":
-            tgt = raw.get("antibody_target","")
-            for entry in raw.get("antibodies", []):
-                # Call the new flatten_antibody function
-                rec = flatten_antibody(entry.copy(), tgt, file.name)
-                records.append(rec)
-        else:
-            entries = (
-                raw.get("models", []) if dataset=="animal_models"
-                else raw if isinstance(raw, list)
-                else raw.get("plasmids", raw)
-            )
-            for entry in entries:
-                rec = {}
-                if dataset=="cell_lines":
-                    rec = flatten_cell_line(raw, file.name)
-                elif dataset=="plasmids":
-                    rec = flatten_plasmid(entry, file.name)
-                elif dataset=="animal_models":
-                    rec = flatten_animal_model({**entry, "organism": raw.get("organism",file.stem)}, file.name)
-                records.append(rec)
-    return pd.DataFrame(records)
+
+    if dataset == "experiments":
+        database_file = database_folder / "database.yaml"
+        database = yaml.safe_load(database_file.read_text()) or {}
+
+        for hard_drive_idx, hard_drive_info in database.items():
+            hard_drive_file = database_folder / hard_drive_idx / "drive_metadata.yaml"
+            hard_drive_content = yaml.safe_load(hard_drive_file.read_text()) or {}
+            for exp_idx, exp_metadata in hard_drive_content["experiments"].items():
+                exp_info = extract_experiment_info(database_folder / hard_drive_idx / exp_idx)
+                exp_info.update({k:v for k,v in exp_metadata.items() if k not in ["experiment_checksum"]})  # Merge dictionaries
+                exp_info.update({k:v for k,v in hard_drive_info.items() if k not in ["physical_serial_number", 
+                                                                                    "volume_serial_number"]})  # Merge dictionaries
+                records.append(exp_info)
+    else:
+        for file in database_folder.glob("*.yaml"):
+            raw = yaml.safe_load(file.read_text()) or {}
+            if dataset == "antibodies":
+                tgt = raw.get("antibody_target","")
+                for entry in raw.get("antibodies", []):
+                    # Call the new flatten_antibody function
+                    rec = flatten_antibody(entry.copy(), tgt, file.name)
+                    records.append(rec)
+            else:
+                entries = (
+                    raw.get("models", []) if dataset=="animal_models"
+                    else raw if isinstance(raw, list)
+                    else raw.get("plasmids", raw)
+                )
+                for entry in entries:
+                    rec = {}
+                    if dataset=="cell_lines":
+                        rec = flatten_cell_line(raw, file.name)
+                    elif dataset=="plasmids":
+                        rec = flatten_plasmid(entry, file.name)
+                    elif dataset=="animal_models":
+                        rec = flatten_animal_model({**entry, "organism": raw.get("organism",file.stem)}, file.name)
+                    records.append(rec)
+    df = pd.DataFrame(records)
+    return df
 
 # ─── FLATTEN HELPERS ─────────────────────────────────────────────────────────
+def extract_experiment_info(src: str) -> Dict[str, Any]:
+    experiment_metadata_file = src / "metadata.yaml"
+    if not experiment_metadata_file.exists():
+        return {}
+
+    metadata = yaml.safe_load(experiment_metadata_file.read_text()) or {}
+
+    filtered_metadata = {}
+
+    for key, value in metadata.items():
+        filtered_metadata.update(flatten_experiment_metadata(key, value))
+
+    return filtered_metadata 
+
+def flatten_experiment_metadata(key, value):
+
+    # First do a checking of specific key values
+    if key == "conditions":
+        return {key: "<br>".join([v["name"] for k, v in value.items()])}
+    elif key in ["repeats", "experiment_id"]:
+        return {}
+
+    if not isinstance(value, dict) and not isinstance(value, list):
+        return {key: value}
+    elif isinstance(value, dict):
+        output_dict = {}
+        for sub_key, sub_value in value.items():
+            output_dict.update(flatten_experiment_metadata(f"{key}.{sub_key}", sub_value))
+        return output_dict
+    elif isinstance(value, list):
+        any_list_dict = any(isinstance(item, list) or isinstance(item, dict) for item in value)
+
+        if any_list_dict:
+            output_dict = {}
+            for i, item in enumerate(value):
+                output_dict.update(flatten_experiment_metadata(f"{key}.{i}", item))
+            return output_dict
+        else:
+            return {key: "<br>".join(value)}
+    return {}
+
+
 def flatten_antibody(d, target, src):
     """Flattens antibody data, specifically handling status and website fields."""
     d["antibody_target"] = target
@@ -471,42 +577,112 @@ else:
         k: [prettify_col(c) for c in cols]
         for k, cols in cfg.items()
     }
+    
+    # --- Session state for filters
+    if "filters" not in st.session_state:
+        st.session_state.filters = {}  # {column: text}
+    if "filter_options" not in st.session_state:
+        st.session_state.filter_options = []
 
     st.success(f"Loaded: {repo_path.name}")
+
     configs = repo_path / "configs"
+    database = repo_path / "database"
 
-    if not configs.exists():
-        st.error("`configs/` folder not found in repo.")
+    if not database.exists() and not configs.exists():
+        st.warning("No database found.")
         st.stop()
 
+    # Prepare choices for the database selection
     choices = [k for k in DESKTOP_CONFIG if (configs/k).is_dir()] # Use DESKTOP_CONFIG keys for initial choices
-    if not choices:
-        st.warning("No datasets found.")
-        st.stop()
-    
-    col1, col2 = st.columns([1, 3]) # These columns will automatically stack on mobile
+    choices.insert(0, "experiments")
+    choices.sort()
+    pretty_choices = [PRETTY_DATABASES.get(c, c) for c in choices]
+
+    # Choose and load the database
+    st.subheader("Choose the database to explore")
+    ds = st.selectbox("Database options:", pretty_choices)
+    ds = choices[pretty_choices.index(ds)]
+
+    df = load_dataset(ds, repo_path)
+
+    st.session_state.filter_options = sorted(prettified_field_config[ds].copy())
+
+    st.subheader("Add a filter")
+
+    col1, col2 = st.columns([1,3])
     with col1:
-        ds = st.selectbox("Dataset", choices)
+        filtering_col = st.selectbox("Choose column", st.session_state.filter_options, key="filter_col")
     with col2:
-        query = st.text_input("🔍 Filter rows…", key=f"search_{ds}", placeholder="Search…")
-    
-    df = load_dataset(ds, configs)
-    if query:
-        df = df[df.apply(lambda r: r.astype(str).str.contains(query, case=False).any(), axis=1)]
+        if filtering_col == "Start Date":
+            sub_col1, sub_col2, sub_col3, sub_col4 = st.columns([1,19,1,19])
+            # Add an initial and end date values
+            with sub_col1:
+                flag_from_date = st.checkbox("", key="flag_from_date")
+            with sub_col2:
+                from_date = st.date_input("From", key="filter_start_date", disabled=not flag_from_date)
+            with sub_col3:
+                flag_to_date = st.checkbox("", key="flag_to_date")
+            with sub_col4:
+                to_date = st.date_input("To", key="filter_end_date", disabled=not flag_to_date)
+            val = (from_date if flag_from_date else None, 
+                   to_date if flag_to_date else None)
+        else:
+            val = st.text_input("Text to filter by", key="filter_val")
+
+    if st.button("➕ Add filter"):
+        if val:
+            st.session_state.filters[filtering_col] = val
+
+            st.session_state.filter_options.remove(filtering_col)
+            st.rerun()  # force rerun so UI updates right away
+
+    # --- Display current filters
+    if st.session_state.filters:
+        st.subheader("Active filters")
+        for key, value in st.session_state.filters.items():
+            col1, col2 = st.columns([3, 1])
+            if key == "Start Date" and isinstance(value, tuple):
+                from_date, to_date = value
+                from_text = f"from {from_date}" if from_date else ""
+                to_text = f"to {to_date}" if to_date else ""
+                additional_text = "None" if not from_date and not to_date else " "
+                col1.write(f"**{key}** contains{additional_text}`{from_text}{to_text}`")
+            else:
+                col1.write(f"**{key}** contains `{value}`")
+            if col2.button("❌", key=f"rm_{key}"):
+                st.session_state.filters.pop(key)  # remove immediately
+
+                st.session_state.filter_options.append(key)
+                st.session_state.filter_options.sort()
+                
+                st.rerun()  # force rerun so UI updates right away
+
     if ds == "cell_lines":
         df = df.drop_duplicates(subset=["cell_line_name"])
 
-    st.info(f"Showing {len(df)} records")
     if not df.empty:
         # use the chosen config
-        cols = cfg[ds] # Use the selected config (mobile or desktop)
+        cols = cfg[ds]
         pretty_cols = [prettify_col(c) for c in cols]
 
         disp = df[cols].copy()
         disp.columns = pretty_cols
         for c in pretty_cols:
             disp[c] = disp[c].apply(pretty_val)
+        
+        for col, val in st.session_state.filters.items():
+            if col == "Start Date" and isinstance(val, tuple):
+                from_date, to_date = val
+                if from_date:
+                    disp = disp[pd.to_datetime(disp[col], errors='coerce') >= pd.to_datetime(from_date)]
+                if to_date:
+                    disp = disp[pd.to_datetime(disp[col], errors='coerce') <= pd.to_datetime(to_date)]
+            else:
+                disp = disp[disp[col].astype(str).str.contains(val, case=False, na=False)]
 
+        st.info(f"Showing {len(disp)} records")
+        
         st.markdown(
             make_all_links_clickable(disp).to_html(escape=False, index=False),
             unsafe_allow_html=True,
@@ -522,41 +698,47 @@ else:
         # Use st.expander for a cleaner detail card display
         with st.expander("Show Full Record Details", expanded=False):
             # Ensure label_col uses the full DESKTOP_CONFIG field to always get a good label
-            label_col = "antibody_name" if ds == "antibodies" else DESKTOP_CONFIG[ds][0]
+            label_col = "experiment_name" if "experiment_name" in df.columns else df.columns[0]
             sel_index = st.selectbox(
                 "Select a record to view details:",
-                df.index,
+                disp.index,
                 format_func=lambda i: df.loc[i].get(label_col, f"Row {i}"),
-                key=f"details_select_{ds}"
+                key="details_select"
             )
-            
+
             # Use columns to display key-value pairs
             sel_record = df.loc[sel_index]
-            
-            # A more robust way to display the detail card using Streamlit
-            st.markdown('<div class="detail-card">', unsafe_allow_html=True)
-            st.markdown(f"### Details for: {sel_record.get(label_col, 'Record')}")
-            
-            # Using st.columns for better alignment without raw HTML dl/dt/dd
-            # These columns will automatically stack on mobile due to default Streamlit behavior
-            detail_cols = st.columns(2) 
-            
-            # Create a list of items to display
-            # Display all details for the selected record, regardless of mobile/desktop table view
-            details_to_show = [(k, pretty_val(v)) for k, v in sel_record.items()]
-            
-            # Distribute items across the columns
-            mid_point = len(details_to_show) // 2
-            col1_items = details_to_show[:mid_point]
-            col2_items = details_to_show[mid_point:]
 
-            with detail_cols[0]:
-                for k, v in col1_items:
-                    st.markdown(f"**{prettify_col(k)}:** {v}")
-            
-            with detail_cols[1]:
-                for k, v in col2_items:
-                    st.markdown(f"**{prettify_col(k)}:** {v}")
-                    
-            st.markdown('</div>', unsafe_allow_html=True)
-            
+            # A more robust way to display the detail card using Streamlit
+            st.markdown(f"### Details for: {sel_record.get(label_col, 'Record')}")
+            with st.container():
+                # Using st.columns for better alignment without raw HTML dl/dt/dd
+                # These columns will automatically stack on mobile due to default Streamlit behavior
+                detail_cols = st.columns(2) 
+                
+                # Create a list of items to display
+                # Display all details for the selected record, regardless of mobile/desktop table view
+                details_to_show = [(k, pretty_val(v)) for k, v in sel_record.items()]
+                
+                # Distribute items across the columns
+                mid_point = len(details_to_show) // 2
+                col1_items = details_to_show[:mid_point]
+                col2_items = details_to_show[mid_point:]
+
+                with detail_cols[0]:
+                    for key, value in col1_items:
+                        if isinstance(value, str) and "<br>" in value:
+                            items = value.split("<br>")
+                            value = "\n".join([f"- {item}" for item in items])
+                            st.markdown(f"**{prettify_col(key)}:**\n{value}")
+                        else:
+                            st.markdown(f"**{prettify_col(key)}:** {value}")
+
+                with detail_cols[1]:
+                    for key, value in col2_items:
+                        if isinstance(value, str) and "<br>" in value:
+                            items = value.split("<br>")
+                            value = "\n".join([f"- {item}" for item in items])
+                            st.markdown(f"**{prettify_col(key)}:**\n{value}")
+                        else:
+                            st.markdown(f"**{prettify_col(key)}:** {value}")
