@@ -200,9 +200,9 @@ def pretty_val(v: Any) -> Any:
 @st.cache_data(show_spinner=False)
 def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
     if dataset == "experiments":
-        database_folder = database_root_path / "database"
+        database_folder = database_root_path / "experiment_database"
     else:
-        database_folder = database_root_path / "configs" / dataset
+        database_folder = database_root_path / "lab_database" / dataset
 
     if not database_folder.exists():
         return pd.DataFrame()
@@ -210,7 +210,7 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
     records = []
 
     if dataset == "experiments":
-        database_file = database_folder / "database.yaml"
+        database_file = database_folder / "experiment_database.yaml"
         database = yaml.safe_load(database_file.read_text()) or {}
 
         for hard_drive_idx, hard_drive_info in database.items():
@@ -465,15 +465,15 @@ else:
 
     st.success(f"Loaded: {repo_path.name}")
 
-    configs = repo_path / "configs"
-    database = repo_path / "database"
+    lab_database = repo_path / "lab_database"
+    experiment_database = repo_path / "experiment_database"
 
-    if not database.exists() and not configs.exists():
+    if not experiment_database.exists() and not lab_database.exists():
         st.warning("No database found.")
         st.stop()
 
     # Prepare choices for the database selection
-    choices = [k for k in DESKTOP_CONFIG if (configs/k).is_dir()] # Use DESKTOP_CONFIG keys for initial choices
+    choices = [k for k in DESKTOP_CONFIG if (lab_database/k).is_dir()] # Use DESKTOP_CONFIG keys for initial choices
     choices.insert(0, "experiments")
     choices.sort()
     pretty_choices = [PRETTY_DATABASES.get(c, c) for c in choices]
