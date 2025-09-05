@@ -496,7 +496,7 @@ else:
         # Only take relevant columns
         temp_df = df[cfg[ds].keys()].copy()
 
-        # oad the filtering options and create the sidebar widget for filtering
+        # Load the filtering options and create the sidebar widget for filtering
         ignore_columns = [e for e in IGNORE_FILTER_COLUMNS.get(ds, []) if e in cfg.keys()]
         create_data = cfg[ds]      
 
@@ -512,8 +512,21 @@ else:
         pretty_cols = [prettify_col(c) for c in filtered_df.columns]
         filtered_df.columns = pretty_cols
 
+        # Create a general search bar that filters across all columns
+        search_term = st.text_input("🔍 Global search", 
+                                    placeholder="Type here...", 
+                                    help="Type to search across all fields",
+                                    key="global_search", 
+                                    on_change=(st.rerun if hasattr(st, "rerun") else st.experimental_rerun),
+                                    )
+        term = st.session_state.get("global_search", "").strip()
+        if term:
+            mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False, na=False).any(), axis=1)
+            filtered_df = filtered_df[mask]
+
         # Display the filtered dataframe
         st.info(f"Showing {len(filtered_df)} records")
+
         event = st.dataframe(
             filtered_df, 
             height="auto", 
