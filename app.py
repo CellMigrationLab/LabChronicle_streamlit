@@ -524,10 +524,10 @@ else:
                 "Publication DOI": st.column_config.LinkColumn("Publication DOI", display_text="Link")
             }
         )
-
+        selected_rows = filtered_df.index[event.selection.rows] if event.selection.rows else []
         st.download_button(
                 label="Export Selected Rows",
-                data=df.loc[event.selection.rows].to_csv(),
+                data=filtered_df.loc[selected_rows].to_csv(),
                 file_name="selected_rows.csv",
                 mime="text/csv",
                 disabled=not event.selection.rows
@@ -553,22 +553,22 @@ else:
 
     # --- Detail Card ---
     # Moved the detail card selection to only appear when data is available
-    if not df.empty:
+    if not filtered_df.empty:
         st.divider() # Use a divider for better separation
         
         # Use st.expander for a cleaner detail card display
         with st.expander("Show Full Record Details", expanded=False):
             # Ensure label_col uses the full DESKTOP_CONFIG field to always get a good label
-            label_col = "experiment_name" if "experiment_name" in df.columns else df.columns[0]
+            label_col = "experiment_name" if "experiment_name" in filtered_df.columns else filtered_df.columns[0]
             sel_index = st.selectbox(
                 "Select a record to view details:",
                 filtered_df.index,
-                format_func=lambda i: df.loc[i].get(label_col, f"Row {i}"),
+                format_func=lambda i: filtered_df.loc[i].get(label_col, f"Row {i}"),
                 key="details_select"
             )
 
             # Use columns to display key-value pairs
-            sel_record = df.loc[sel_index]
+            sel_record = filtered_df.loc[sel_index]
 
             # A more robust way to display the detail card using Streamlit
             st.markdown(f"### Details for: {sel_record.get(label_col, 'Record')}")
