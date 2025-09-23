@@ -563,13 +563,21 @@ else:
         # Create a general search bar that filters across all columns
         search_term = st.text_input("🔍 Global search", 
                                     placeholder="Type here...", 
-                                    help="Type to search across all fields",
+                                    help="Type to search across all fields. If you want to search for multiple terms, separate them with commas.",
                                     key="global_search", 
                                     on_change=(st.rerun if hasattr(st, "rerun") else st.experimental_rerun),
                                     )
         term = st.session_state.get("global_search", "").strip()
+
         if term:
-            mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False, na=False).any(), axis=1)
+            if "," in term:
+                terms = [t.strip() for t in term.split(",") if t.strip()]
+                mask = filtered_df.apply(
+                    lambda row: any(row.astype(str).str.contains(t, case=False, na=False).any() for t in terms),
+                    axis=1
+                )
+            else:
+                mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False, na=False).any(), axis=1)
             filtered_df = filtered_df[mask]
 
         # Display the filtered dataframe
