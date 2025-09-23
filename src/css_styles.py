@@ -151,5 +151,13 @@ def apply_custom_css():
             font-size: 0.9em; /* Slightly smaller font for table text */
         }
     }
+                
+    .gradient-header {
+        background: linear-gradient(90deg, #2159a6 0%, #3a7bd5 100%);
+        padding: 1.5rem 1rem 1rem 1rem;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+    }
+
     </style>
     """, unsafe_allow_html=True)
