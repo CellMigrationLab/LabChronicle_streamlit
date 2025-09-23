@@ -2,3 +2,4 @@ streamlit==1.49.1
 pyyaml==6.0.2
 pandas==2.3.2
 requests==2.32.5
+reportlab==4.4.4

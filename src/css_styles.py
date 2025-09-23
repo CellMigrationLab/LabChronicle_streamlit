@@ -5,12 +5,17 @@ def apply_custom_css():
     """Applies custom CSS to the Streamlit app for mobile friendliness."""
     st.markdown("""
     <style>
-    /* Gradient Header */
-    .gradient-header {
-        background: linear-gradient(90deg, #2159a6, #23a3b5);
-        padding: 18px 0 10px 18px;
-        border-radius: 12px;
-        margin-bottom: 28px;
+    /* Green CSV button */
+    button[aria-label="CSV"] {
+        background-color: #2ecc40 !important;
+        color: white !important;
+        border: none !important;
+    }
+    /* Red PDF button */
+    button[aria-label="PDF"] {
+        background-color: #ff4136 !important;
+        color: white !important;
+        border: none !important;
     }
 
     .gradient-header h1 {
@@ -146,6 +151,5 @@ def apply_custom_css():
             font-size: 0.9em; /* Slightly smaller font for table text */
         }
     }
-
     </style>
     """, unsafe_allow_html=True)

@@ -1,8 +1,13 @@
 # Inject custom CSS to make sidebar wider and force it open by default
 import streamlit as st
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 from typing import Optional, Dict, Any
-from datetime import datetime
 from pathlib import Path
+from io import BytesIO
 import pandas as pd
 import urllib.parse
 import subprocess
@@ -41,6 +46,49 @@ st.markdown("""
   </span>
 </div>
 """, unsafe_allow_html=True)
+
+# ─── PDF EXPORTER ────────────────────────────────────────────────────────────
+
+def df_to_pdf(df):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(letter),
+        leftMargin=0.5*inch,
+        rightMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
+    )
+    styles = getSampleStyleSheet()
+    style = styles["Normal"]
+    style.fontSize = 8
+
+    # Prepare table data with wrapped text
+    data = [[Paragraph(str(col), style) for col in df.columns]]
+    for _, row in df.iterrows():
+        data.append([Paragraph(str(cell), style) for cell in row])
+
+    num_cols = len(df.columns)
+    page_width = landscape(letter)[0] - doc.leftMargin - doc.rightMargin
+    col_width = page_width / num_cols if num_cols else page_width
+
+    # repeatRows=1 ensures the header row is repeated on each page
+    table = Table(data, colWidths=[col_width]*num_cols, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.whitesmoke),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+
+    doc.build([table])
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # ─── CONFIGS ────────────────────────────────────────────────────────────────
 DESKTOP_CONFIG = {
@@ -537,15 +585,31 @@ else:
                 "Publication DOI": st.column_config.LinkColumn("Publication DOI", display_text="Link")
             }
         )
-        selected_rows = filtered_df.index[event.selection.rows] if event.selection.rows else []
-        st.download_button(
-                label="Export Selected Rows",
-                data=filtered_df.loc[selected_rows].to_csv(),
-                file_name="selected_rows.csv",
-                mime="text/csv",
-                disabled=not event.selection.rows
-            )
         
+        selected_rows = filtered_df.index[event.selection.rows] if event.selection.rows else []
+       
+        # Display export buttons in a horizontal layout
+        with st.container():
+            col1, col2, col3, col4 = st.columns([0.22, 0.1, 0.1, 1.5], gap="small")
+            with col1:
+                st.markdown("**Export selected rows:**")
+            with col2:
+                st.download_button(
+                    label="CSV",
+                    data=filtered_df.loc[selected_rows].to_csv(),
+                    file_name="selected_rows.csv",
+                    mime="text/csv",
+                    disabled=not event.selection.rows
+                )
+            with col3:
+                st.download_button(
+                    label="PDF",
+                    data=df_to_pdf(filtered_df.loc[selected_rows]),
+                    file_name="selected_rows.pdf",
+                    mime="application/pdf",
+                    disabled=not event.selection.rows
+                )
+
     else:
         st.warning("No matching records found for the selected dataset or filters.")
         
