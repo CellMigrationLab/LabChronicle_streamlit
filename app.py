@@ -500,6 +500,10 @@ if "repo_path" not in st.session_state:
         else:
             st.warning("Please enter a GitHub repository URL.")
 else:
+
+    if 'last_added' not in st.session_state:
+        st.session_state.last_added = None
+    
     repo_path = st.session_state.repo_path
 
     # Determine which config to use based on the current mobile_view_checkbox state
@@ -620,18 +624,25 @@ else:
             updated_selection = non_visible_selected | visible_selected
 
         if updated_selection != stored_selection:
+            if len(updated_selection) > len(stored_selection):
+                st.session_state.last_added = (updated_selection - stored_selection).pop()
+            else:
+                st.session_state.last_added = None
             valid_indices = set(df.index)
             updated_selection = {idx for idx in updated_selection if idx in valid_indices}
             st.session_state[selection_state_key] = updated_selection
             st.rerun()
 
+        # Include buttons for "Select All" and "Clear Selection"
         info_col, select_button_col, clear_button_col = st.columns([0.3, 0.35, 0.35], gap="small")
         info_col.markdown(f"**Selected rows:** {len(updated_selection)}")
         if select_button_col.button("Select all rows", use_container_width=True, key=f"select_all_{ds}"):
             st.session_state[selection_state_key] = updated_selection | visible_index_set
+            st.session_state.last_added = None
             st.rerun()
         if clear_button_col.button("Clear selection", use_container_width=True, key=f"clear_selection_{ds}"):
             st.session_state[selection_state_key] = set()
+            st.session_state.last_added = None
             st.rerun()
 
         # Display export buttons in a horizontal layout
@@ -693,8 +704,9 @@ else:
             # Ensure label_col uses the full DESKTOP_CONFIG field to always get a good label
             label_col = "experiment_name" if "experiment_name" in filtered_df.columns else filtered_df.columns[0]
             sel_index = st.selectbox(
-                "Select a record to view details:",
-                filtered_df.index,
+                label="Select a record to view details:",
+                options=filtered_df.index,
+                index = list(filtered_df.index).index(st.session_state.last_added) if st.session_state.last_added is not None else 0,
                 format_func=lambda i: filtered_df.loc[i].get(label_col, f"Row {i}"),
                 key="details_select"
             )
@@ -727,7 +739,6 @@ else:
                         else:
                             st.markdown(f"**{prettify_col(key)}:** {value}")
 
-
                 with detail_cols[1]:
                     for key, value in col2_items:
                         if isinstance(value, str) and ",\n" in value:
@@ -737,3 +748,10 @@ else:
                         else:
                             st.markdown(f"**{prettify_col(key)}:** {value}")
 
+                # Include a button to select this record in the main table
+                if st.button("Select this record in the main table", key="select_in_main_table"):
+                    current_selection = set(st.session_state.get(selection_state_key, set()))
+                    current_selection.add(sel_index)
+                    st.session_state[selection_state_key] = current_selection
+                    st.session_state.last_added = sel_index
+                    st.rerun()
