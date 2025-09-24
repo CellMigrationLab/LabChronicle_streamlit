@@ -557,8 +557,7 @@ else:
 
         # Filter the dataframe
         filtered_df = streamlit_pandas.filter_df(temp_df, all_widgets)
-        pretty_cols = [prettify_col(c) for c in filtered_df.columns]
-        filtered_df.columns = pretty_cols
+        pretty_cols_mapping = {col: prettify_col(col) for col in filtered_df.columns}
 
         # Create a general search bar that filters across all columns
         search_term = st.text_input("🔍 Global search", 
@@ -581,41 +580,89 @@ else:
             filtered_df = filtered_df[mask]
 
         # Display the filtered dataframe
-        st.info(f"Showing {len(filtered_df)} records")
+        display_df = filtered_df.rename(columns=pretty_cols_mapping)
 
-        event = st.dataframe(
-            filtered_df, 
-            height="auto", 
-            hide_index=True,    
-            on_select="rerun",
-            column_config={
-                "Website": st.column_config.LinkColumn("Website", display_text="Link"),
-                "Publication DOI": st.column_config.LinkColumn("Publication DOI", display_text="Link")
-            }
+        st.info(f"Showing {len(display_df)} records")
+
+        SELECTED_COL = "Selected"
+        selection_state_key = f"selected_rows__{ds}"
+        stored_selection = set(st.session_state.get(selection_state_key, set()))
+
+        visible_indices = list(display_df.index)
+        visible_index_set = set(visible_indices)
+
+        table_df = display_df.copy()
+        table_df.insert(0, SELECTED_COL, table_df.index.to_series().isin(stored_selection))
+
+        column_config = {
+            SELECTED_COL: st.column_config.CheckboxColumn("Select", help="Mark rows for export")
+        }
+        if "Website" in table_df.columns:
+            column_config["Website"] = st.column_config.LinkColumn("Website", display_text="Link")
+        if "Publication DOI" in table_df.columns:
+            column_config["Publication DOI"] = st.column_config.LinkColumn("Publication DOI", display_text="Link")
+
+        disabled_columns = [col for col in table_df.columns if col != SELECTED_COL]
+
+        edited_df = st.data_editor(
+            table_df,
+            height="auto",
+            hide_index=True,
+            column_config=column_config,
+            disabled=disabled_columns,
+            key=f"data_editor__{ds}"
         )
-        
-        selected_rows = filtered_df.index[event.selection.rows] if event.selection.rows else []
-       
+
+        updated_selection = set(stored_selection)
+        if isinstance(edited_df, pd.DataFrame) and SELECTED_COL in edited_df.columns:
+            visible_selected = set(edited_df.index[edited_df[SELECTED_COL].astype(bool)])
+            non_visible_selected = updated_selection - visible_index_set
+            updated_selection = non_visible_selected | visible_selected
+
+        if updated_selection != stored_selection:
+            valid_indices = set(df.index)
+            updated_selection = {idx for idx in updated_selection if idx in valid_indices}
+            st.session_state[selection_state_key] = updated_selection
+            st.rerun()
+
+        info_col, select_button_col, clear_button_col = st.columns([0.3, 0.35, 0.35], gap="small")
+        info_col.markdown(f"**Selected rows:** {len(updated_selection)}")
+        if select_button_col.button("Select all rows", use_container_width=True, key=f"select_all_{ds}"):
+            st.session_state[selection_state_key] = updated_selection | visible_index_set
+            st.rerun()
+        if clear_button_col.button("Clear selection", use_container_width=True, key=f"clear_selection_{ds}"):
+            st.session_state[selection_state_key] = set()
+            st.rerun()
+
         # Display export buttons in a horizontal layout
         with st.container():
             col1, col2, col3, col4 = st.columns([0.22, 0.1, 0.1, 1.5], gap="small")
             with col1:
                 st.markdown("**Export selected rows:**")
+                selected_indices_sorted = [idx for idx in df.index if idx in updated_selection]
+                selected_export_df = pd.DataFrame()
+                if selected_indices_sorted:
+                    selected_export_df = (
+                        df.loc[selected_indices_sorted, cfg[ds].keys()]
+                          .rename(columns=pretty_cols_mapping)
+                    )
+                csv_data = selected_export_df.to_csv(index=False) if not selected_export_df.empty else ""
+                pdf_data = df_to_pdf(selected_export_df) if not selected_export_df.empty else b""
             with col2:
                 st.download_button(
                     label="CSV",
-                    data=filtered_df.loc[selected_rows].to_csv(),
+                    data=csv_data,
                     file_name="selected_rows.csv",
                     mime="text/csv",
-                    disabled=not event.selection.rows
+                    disabled=selected_export_df.empty
                 )
             with col3:
                 st.download_button(
                     label="PDF",
-                    data=df_to_pdf(filtered_df.loc[selected_rows]),
+                    data=pdf_data,
                     file_name="selected_rows.pdf",
                     mime="application/pdf",
-                    disabled=not event.selection.rows
+                    disabled=selected_export_df.empty
                 )
 
     else:
@@ -680,6 +727,7 @@ else:
                         else:
                             st.markdown(f"**{prettify_col(key)}:** {value}")
 
+
                 with detail_cols[1]:
                     for key, value in col2_items:
                         if isinstance(value, str) and ",\n" in value:
@@ -688,3 +736,4 @@ else:
                             st.markdown(f"**{prettify_col(key)}:**\n{value}")
                         else:
                             st.markdown(f"**{prettify_col(key)}:** {value}")
+

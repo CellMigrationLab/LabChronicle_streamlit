@@ -159,12 +159,5 @@ def apply_custom_css():
         margin-bottom: 2rem;
     }
 
-    /* Glow effect for selected row in st.dataframe */
-    [data-testid="stDataFrame"] tbody tr[data-selected="true"] {
-        box-shadow: 0 0 8px 2px #2159a6;
-        border: 2px solid #2159a6 !important;
-        z-index: 2;
-    }
-
     </style>
     """, unsafe_allow_html=True)
