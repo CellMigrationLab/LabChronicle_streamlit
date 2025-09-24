@@ -2,7 +2,7 @@
 import streamlit as st
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 from typing import Optional, Dict, Any
@@ -18,6 +18,31 @@ import html
 
 import src.streamlit_pandas as streamlit_pandas
 from src.css_styles import apply_custom_css
+
+# ─── CONSTANTS & HELPERS ─────────────────────────────────────────────────────
+GITHUB_BLOB_BASE = "blob"
+
+def get_repo_branch(repo_path: Path) -> str:
+    """Return the current branch name for the cloned repository."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        branch = result.stdout.strip()
+        return branch or "main"
+    except Exception:
+        return "main"
+
+
+def normalize_repo_url(url: str) -> str:
+    """Strip trailing slashes and .git from a GitHub repository URL."""
+    cleaned = url.strip()
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    return cleaned.rstrip("/")
 
 # ─── PAGE CONFIG ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -60,13 +85,38 @@ def df_to_pdf(df):
         bottomMargin=0.5*inch
     )
     styles = getSampleStyleSheet()
-    style = styles["Normal"]
-    style.fontSize = 8
+    base_style = styles["Normal"]
+    style = ParagraphStyle(
+        name="ExportBody",
+        parent=base_style,
+        fontSize=8,
+        leading=10,
+    )
+    link_style = ParagraphStyle(
+        name="ExportLink",
+        parent=style,
+        textColor=colors.blue,
+        underline=True,
+    )
+
+    def make_paragraph(value: Any) -> Paragraph:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            text = ""
+            return Paragraph(text, style)
+
+        text = str(value)
+        if text.startswith("http://") or text.startswith("https://"):
+            safe_url = html.escape(text, quote=True)
+            display_text = html.escape(text, quote=True)
+            return Paragraph(f'<link href="{safe_url}">{"Link"}</link>', link_style)
+
+        safe_text = html.escape(text)
+        return Paragraph(safe_text, style)
 
     # Prepare table data with wrapped text
-    data = [[Paragraph(str(col), style) for col in df.columns]]
+    data = [[Paragraph(html.escape(str(col)), style) for col in df.columns]]
     for _, row in df.iterrows():
-        data.append([Paragraph(str(cell), style) for cell in row])
+        data.append([make_paragraph(cell) for cell in row])
 
     num_cols = len(df.columns)
     page_width = landscape(letter)[0] - doc.leftMargin - doc.rightMargin
@@ -207,7 +257,7 @@ def prettify_col(col: str) -> str:
         "catalog_id": "Catalog ID",
         "cell_line_name": "Cell Line Name",
         "derived_from": "Derived From",
-        "source_file": "YAML File",
+        "source_file": "Source YAML File",
         "selection_marker": "Selection Marker",
         "amplification_host": "Amplification Host",
         "sequencing_validation": "Sequencing Validated",
@@ -496,6 +546,8 @@ if "repo_path" not in st.session_state:
             rp = clone_repo(owner, private, token)
             if rp:
                 st.session_state.repo_path = rp
+                st.session_state.repo_url = normalize_repo_url(owner)
+                st.session_state.repo_branch = get_repo_branch(rp)
                 st.rerun()
         else:
             st.warning("Please enter a GitHub repository URL.")
@@ -503,8 +555,14 @@ else:
 
     if 'last_added' not in st.session_state:
         st.session_state.last_added = None
+    if 'selected_database' not in st.session_state:
+        st.session_state.selected_database = None
     
     repo_path = st.session_state.repo_path
+    if "repo_branch" not in st.session_state:
+        st.session_state.repo_branch = get_repo_branch(repo_path)
+    if "repo_url" not in st.session_state:
+        st.session_state.repo_url = ""
 
     # Determine which config to use based on the current mobile_view_checkbox state
     cfg = MOBILE_CONFIG if st.session_state.mobile_view_checkbox else DESKTOP_CONFIG
@@ -534,6 +592,14 @@ else:
     st.subheader("Choose the database to explore")
     ds = st.selectbox("Database options:", pretty_choices)
     ds = choices[pretty_choices.index(ds)]
+
+    if st.session_state.selected_database != ds:
+        st.session_state.selected_database = ds
+        st.session_state.last_added = None
+        selection_state_key = f"selected_rows__{ds}"
+        if selection_state_key not in st.session_state:
+            st.session_state[selection_state_key] = set()
+        st.rerun()
 
     df = load_dataset(ds, repo_path)
     
@@ -598,8 +664,16 @@ else:
         table_df = display_df.copy()
         table_df.insert(0, SELECTED_COL, table_df.index.to_series().isin(stored_selection))
 
+        select_column_width: Any = 25
+        if st.session_state.mobile_view_checkbox:
+            select_column_width = 5
+
         column_config = {
-            SELECTED_COL: st.column_config.CheckboxColumn("Select", help="Mark rows for export")
+            SELECTED_COL: st.column_config.CheckboxColumn(
+                "Select",
+                help="Mark rows for export",
+                width=select_column_width,
+            )
         }
         if "Website" in table_df.columns:
             column_config["Website"] = st.column_config.LinkColumn("Website", display_text="Link")
@@ -652,11 +726,52 @@ else:
                 st.markdown("**Export selected rows:**")
                 selected_indices_sorted = [idx for idx in df.index if idx in updated_selection]
                 selected_export_df = pd.DataFrame()
+                export_columns = [
+                    col
+                    for col in list(cfg[ds].keys()) + ["source_file"]
+                    if col in df.columns
+                ]
+                export_pretty_mapping = {
+                    col: pretty_cols_mapping.get(col, prettify_col(col))
+                    for col in export_columns
+                }
+
                 if selected_indices_sorted:
-                    selected_export_df = (
-                        df.loc[selected_indices_sorted, cfg[ds].keys()]
-                          .rename(columns=pretty_cols_mapping)
+                    selected_export_df = df.loc[
+                        selected_indices_sorted, export_columns
+                    ].copy()
+
+                    if "source_file" in selected_export_df.columns:
+                        
+                        repo_url = st.session_state.get("repo_url", "")
+                        branch = st.session_state.get("repo_branch", "main")
+                        dataset_folder = (
+                            "experiment_database"
+                            if ds == "experiments"
+                            else f"lab_database/{ds}"
+                        )
+
+                        def build_source_link(value: Any) -> Any:
+                            if value is None or (isinstance(value, float) and pd.isna(value)):
+                                return ""
+                            value_str = str(value)
+                            if not value_str:
+                                return value_str
+                            if value_str.startswith("http"):
+                                return value_str
+                            if not repo_url:
+                                return value_str
+                            relative_path = f"{dataset_folder}/{value_str}".replace("\\", "/")
+                            return f"{repo_url}/{GITHUB_BLOB_BASE}/{branch}/{relative_path}"
+
+                        selected_export_df["source_file"] = selected_export_df[
+                            "source_file"
+                        ].apply(build_source_link)
+
+                    selected_export_df = selected_export_df.rename(
+                        columns=export_pretty_mapping
                     )
+                
                 csv_data = selected_export_df.to_csv(index=False) if not selected_export_df.empty else ""
                 pdf_data = df_to_pdf(selected_export_df) if not selected_export_df.empty else b""
             with col2:
