@@ -721,7 +721,7 @@ else:
 
         # Display export buttons in a horizontal layout
         with st.container():
-            col1, col2, col3, col4 = st.columns([0.22, 0.1, 0.1, 1.5], gap="small")
+            col1, col2, col3, col4 = st.columns([0.22, 0.2, 0.2, 1.5], gap="small")
             with col1:
                 st.markdown("**Export selected rows:**")
                 selected_indices_sorted = [idx for idx in df.index if idx in updated_selection]
