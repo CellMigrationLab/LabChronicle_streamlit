@@ -21,6 +21,7 @@ from src.css_styles import apply_custom_css
 
 # ─── CONSTANTS & HELPERS ─────────────────────────────────────────────────────
 GITHUB_BLOB_BASE = "blob"
+NOT_AVAILABLE = "_not available_"
 
 def get_repo_branch(repo_path: Path) -> str:
     """Return the current branch name for the cloned repository."""
@@ -211,7 +212,14 @@ DESKTOP_CONFIG = {
         "conditions": "text",
         "device_name": "text",
         "location": "text",
-        "lab_chronicle_version": "text"
+        "lab_chronicle_version": "text",
+        "experiment_description": "text"
+    },
+    "publications": {
+        "title": "text",
+        "stage": "multiselect",
+        "num_figures": "number",
+        "experiment_sources": "multiselect"
     }
 }
 
@@ -220,7 +228,8 @@ IGNORE_FILTER_COLUMNS = {
     "antibodies": ["source_file", "website", "notes"],
     "cell_lines": ["source_file", "publication", "notes"],
     "plasmids": ["source_file", "website", "notes"],
-    "experiments": ["lab_chronicle_version", "location"]
+    "experiments": ["lab_chronicle_version", "location", "experiment_description"],
+    "publications": ["publication_id"]
 }
 
 temp_mobile_config = {
@@ -234,6 +243,13 @@ temp_mobile_config = {
         "performed_by",
         "device_name",
         "location",
+        "experiment_description"
+    ],
+    "publications": [
+        "title",
+        "stage",
+        "num_figures",
+        "experiment_sources"
     ]
 }
 
@@ -246,7 +262,8 @@ PRETTY_DATABASES = {
     "cell_lines": "Cell Lines",
     "plasmids": "Plasmids",
     "animal_models": "Animal Models",
-    "experiments": "Experiments"
+    "experiments": "Experiments",
+    "publications": "Publications"
 }
 
 def prettify_col(col: str) -> str:
@@ -282,6 +299,9 @@ def prettify_col(col: str) -> str:
         "device_name": "Device Name",
         "location": "Location",
         "lab_chronicle_version": "LabChronicle Version",
+        # Publication related
+        "num_figures": "Number of Figures",
+        "experiment_sources": "Involved Experiment"
     }
     return manual.get(col, col.replace("_", " ").title())
 
@@ -297,8 +317,11 @@ def pretty_val(v: Any) -> Any:
 # ─── YAML → DataFrame LOADER ─────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
+    
     if dataset == "experiments":
         database_folder = database_root_path / "experiment_database"
+    elif dataset == "publications":
+        database_folder = database_root_path / "publication_database"
     else:
         database_folder = database_root_path / "lab_database" / dataset
 
@@ -315,11 +338,41 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
             hard_drive_file = database_folder / hard_drive_idx / "drive_metadata.yaml"
             hard_drive_content = yaml.safe_load(hard_drive_file.read_text()) or {}
             for exp_idx, exp_metadata in hard_drive_content["experiments"].items():
-                exp_info = extract_experiment_info(database_folder / hard_drive_idx / exp_idx)
+                exp_info = extract_experiment_info(database_folder / hard_drive_idx / exp_idx,
+                                                   experiment_id=exp_idx, 
+                                                   experiment_info=exp_metadata,
+                                                   hard_drive_id=hard_drive_idx, 
+                                                   hard_drive_info=hard_drive_content.get("hard_drive_info", {}))
                 exp_info.update({k:v for k,v in exp_metadata.items() if k not in ["experiment_checksum"]})  # Merge dictionaries
                 exp_info.update({k:v for k,v in hard_drive_info.items() if k not in ["physical_serial_number", 
                                                                                     "volume_serial_number"]})  # Merge dictionaries
                 records.append(exp_info)
+    elif dataset == "publications":
+        for publication_path in database_folder.iterdir():
+            for stage_path in publication_path.iterdir():
+                summary_file = stage_path / "summary.yaml"
+                if summary_file.exists():
+                    summary_information = yaml.safe_load(summary_file.read_text()) or {}
+
+                    num_figures = len(summary_information.keys()) - 1  # Exclude 'publication_name'
+
+                    experiment_sources = []
+                    for key, value in summary_information.items():
+                        if key != "publication_name":
+                            panel_list = value.get("panels", [])
+                            for panel in panel_list:
+                                source_exp = panel.get("experiment_sources", [])
+                                experiment_sources.extend(source_exp)
+
+                    entry = {
+                        "publication_id": publication_path.name,
+                        "stage": stage_path.name,
+                        "title": summary_information.get("publication_name", ""),
+                        "num_figures": num_figures,
+                        "experiment_sources": experiment_sources
+                    }
+                        
+                    records.append(entry)
     else:
         for file in database_folder.glob("*.yaml"):
             raw = yaml.safe_load(file.read_text()) or {}
@@ -348,7 +401,11 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
     return df
 
 # ─── FLATTEN HELPERS ─────────────────────────────────────────────────────────
-def extract_experiment_info(src: str) -> Dict[str, Any]:
+def extract_experiment_info(src, 
+                            experiment_id=None, experiment_info={},
+                            hard_drive_id=None, hard_drive_info={}):
+    
+    # Load experiment metadata
     experiment_metadata_file = src / "metadata.yaml"
     if not experiment_metadata_file.exists():
         return {}
@@ -359,6 +416,43 @@ def extract_experiment_info(src: str) -> Dict[str, Any]:
 
     for key, value in metadata.items():
         filtered_metadata.update(flatten_experiment_metadata(key, value))
+
+    # Build description text
+    cell_lines = filtered_metadata.get("cell_lines", []) if isinstance(filtered_metadata, dict) else []
+    if cell_lines:
+        cell_lines_text = f"The following cell lines were used: **{cell_lines}**."
+    else:
+        cell_lines_text = "No cell lines were specified."
+
+    animal_models = filtered_metadata.get("animal_models", []) if isinstance(filtered_metadata, dict) else []
+    if animal_models:
+        animal_models_text = f"The following animal models were used: **{animal_models}**."
+    else:
+        animal_models_text = "No animal models were specified."
+
+    conditions = filtered_metadata.get("conditions", []) if isinstance(filtered_metadata, dict) else []
+    if conditions:
+        # conditions may be a mapping; support both shapes
+        try:
+            conditions_text = f"{len(conditions.split(','))} conditions were tested: **{conditions}**."
+        except Exception:
+            conditions_text = "Some conditions were specified."
+    else:
+        conditions_text = "No specific conditions were specified."
+
+    description = f'''
+            The experiment **{experiment_id}** was done by **{filtered_metadata.get("performed_by", NOT_AVAILABLE)}**.
+            Started the **{filtered_metadata.get("date_started", NOT_AVAILABLE)}**, 
+            it uses **{filtered_metadata.get("primary_method", NOT_AVAILABLE)}** as primary method.
+            {cell_lines_text}
+            {animal_models_text}
+            {conditions_text}
+            The experiment is stored on hard-drive **{hard_drive_info.get("device_name", NOT_AVAILABLE)}**,
+            on the folder **{experiment_info.get("location", NOT_AVAILABLE)}**.
+            See more details about the experiment [here]({st.session_state.repo_url}/{GITHUB_BLOB_BASE}/{st.session_state.repo_branch}/experiment_database/{hard_drive_id}/{experiment_id}/metadata.yaml).
+            See more details about the hard-drive [here]({st.session_state.repo_url}/{GITHUB_BLOB_BASE}/{st.session_state.repo_branch}/experiment_database/{hard_drive_id}/drive_metadata.yaml).
+            '''
+    filtered_metadata["experiment_description"] = description
 
     return filtered_metadata 
 
@@ -575,16 +669,19 @@ else:
 
     st.success(f"Loaded: {repo_path.name}")
 
+    # Define existing database paths
     lab_database = repo_path / "lab_database"
     experiment_database = repo_path / "experiment_database"
+    publication_database = repo_path / "publication_database"
 
-    if not experiment_database.exists() and not lab_database.exists():
+    if not experiment_database.exists() and not lab_database.exists() and not publication_database.exists():
         st.warning("No database found.")
         st.stop()
 
     # Prepare choices for the database selection
     choices = [k for k in DESKTOP_CONFIG if (lab_database/k).is_dir()] # Use DESKTOP_CONFIG keys for initial choices
     choices.insert(0, "experiments")
+    choices.insert(0, "publications")
     choices.sort()
     pretty_choices = [PRETTY_DATABASES.get(c, c) for c in choices]
 
@@ -615,8 +712,15 @@ else:
         temp_df = df[cfg[ds].keys()].copy()
 
         # Load the filtering options and create the sidebar widget for filtering
-        ignore_columns = [e for e in IGNORE_FILTER_COLUMNS.get(ds, []) if e in cfg.keys()]
+        ignore_columns = [e for e in IGNORE_FILTER_COLUMNS.get(ds, []) if e in cfg.get(ds, {}).keys()]
         create_data = cfg[ds]      
+
+        # For experiments, remove the experiment_description column from display
+        if ds == "experiments":
+            if "experiment_description" in temp_df.columns:
+                temp_df = temp_df.drop(columns=["experiment_description"])
+            if "experiment_description" in ignore_columns:
+                ignore_columns.remove("experiment_description")
 
         with st.sidebar:
             with st.expander("Filter Options"):
@@ -626,7 +730,8 @@ else:
                                                              prettify_function=prettify_col)
 
         # Filter the dataframe
-        filtered_df = streamlit_pandas.filter_df(temp_df, all_widgets)
+        filtered_df = streamlit_pandas.filter_df(df[cfg[ds].keys()].copy(), 
+                                                 all_widgets)
         pretty_cols_mapping = {col: prettify_col(col) for col in filtered_df.columns}
 
         # Create a general search bar that filters across all columns
@@ -648,6 +753,7 @@ else:
             else:
                 mask = filtered_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False, na=False).any(), axis=1)
             filtered_df = filtered_df[mask]
+
 
         # Display the filtered dataframe
         display_df = filtered_df.rename(columns=pretty_cols_mapping)
@@ -745,11 +851,12 @@ else:
                         
                         repo_url = st.session_state.get("repo_url", "")
                         branch = st.session_state.get("repo_branch", "main")
-                        dataset_folder = (
-                            "experiment_database"
-                            if ds == "experiments"
-                            else f"lab_database/{ds}"
-                        )
+                        if ds == "experiments":
+                            dataset_folder = "experiment_database"
+                        elif ds == "publications":
+                            dataset_folder = "publication_database"
+                        else:
+                            dataset_folder = f"lab_database/{ds}"
 
                         def build_source_link(value: Any) -> Any:
                             if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -832,13 +939,19 @@ else:
             # A more robust way to display the detail card using Streamlit
             st.markdown(f"### Details for: {sel_record.get(label_col, 'Record')}")
             with st.container():
+
+                if ds == "experiments":
+                    with st.container(border=True):
+                        st.markdown("#### Short description:")
+                        st.markdown(sel_record.get("experiment_description", "No description available."))
+
                 # Using st.columns for better alignment without raw HTML dl/dt/dd
                 # These columns will automatically stack on mobile due to default Streamlit behavior
                 detail_cols = st.columns(2) 
                 
                 # Create a list of items to display
                 # Display all details for the selected record, regardless of mobile/desktop table view
-                details_to_show = [(k, pretty_val(v)) for k, v in sel_record.items()]
+                details_to_show = [(k, pretty_val(v)) for k, v in sel_record.items() if k != "experiment_description"]
                 
                 # Distribute items across the columns
                 mid_point = len(details_to_show) // 2

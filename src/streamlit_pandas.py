@@ -118,7 +118,11 @@ def filter_df(df, all_widgets):
         if data:
             if ctype == "text":
                 if data != "":
-                    res = res.loc[res[column].str.contains(data)]
+                    # Check if the column contains lists or strings
+                    if res[column].apply(lambda x: isinstance(x, list)).any():
+                        res = res.loc[res[column].apply(lambda x: any(data in str(item) for item in x) if isinstance(x, list) else False)]
+                    else:
+                        res = res.loc[res[column].str.contains(data)]
             elif ctype == "select":
                 res = filter_string(res, column, data)
             elif ctype == "multiselect":
