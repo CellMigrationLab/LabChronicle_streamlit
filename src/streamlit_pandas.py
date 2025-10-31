@@ -22,11 +22,14 @@ def filter_string(df, column, selected_list):
 
 def date_widget(df, column, ss_name, prettify_function=None):
     df = df[df[column].notna()]
-    min = df[column].apply(pd.to_datetime).min().date()
-    max = df[column].apply(pd.to_datetime).max().date()
-    temp_input = st.slider(f"{prettify_function(column) if prettify_function else column.title()}",
-                           min, max, (min, max), key=ss_name)
-    all_widgets.append((ss_name, "date", column))
+    min_date = df[column].apply(pd.to_datetime).min().date()
+    max_date = df[column].apply(pd.to_datetime).max().date()
+    
+    # Ensure that min and max are not the same (only one unique date)
+    if min_date != max_date:
+        temp_input = st.slider(f"{prettify_function(column) if prettify_function else column.title()}",
+                               min_date, max_date, (min_date, max_date), key=ss_name)
+        all_widgets.append((ss_name, "date", column))
 
 def number_widget(df, column, ss_name, prettify_function=None):
     df = df[df[column].notna()]

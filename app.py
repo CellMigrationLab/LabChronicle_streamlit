@@ -178,7 +178,7 @@ DESKTOP_CONFIG = {
         "derived_from": "text",
         "resistance": "text",
         "modifications": "text",
-        "notes": "text",
+        "notes": "-",
         "source": "text",
         "catalog_id": "text",
         "publication": "text",
@@ -191,7 +191,7 @@ DESKTOP_CONFIG = {
         "tag": "text",
         "origin": "text",
         "catalog_id": "text",
-        "website": "text",
+        "website": "-",
         "expression_host": "text",
         "sequencing_validation": "text",
         "location": "text",
@@ -199,6 +199,61 @@ DESKTOP_CONFIG = {
         "status": "text",
         "MTA": "text",
         "publications": "text"
+    },
+    "dyes": {
+        "dye_target": "text",
+        "dye_name": "text",
+        "dye_type": "multiselect",
+        "company": "multiselect",
+        "catalog_id": "text",
+        "website": "-",
+        "live_imaging": "multiselect",
+        "fixed_sample": "multiselect",
+        "light_sensitive": "multiselect",
+        "solvent": "text",
+        "stock_concentration": "text",
+        "working_concentration": "text",
+        "location": "text",
+        "date": "date",
+        "status.tube": "multiselect",
+        "status.reorder": "multiselect",
+        "status.last_checked": "date",
+        "notes": "-"
+    },
+    "inhibitors": {
+        "compound": "text",
+        "company": "multiselect",
+        "aliases": "text",
+        "catalog_id": "text",
+        "website": "-",
+        "cas": "text",
+        "solvent": "text",
+        "stock_concentration": "text",
+        "working_concentration": "text",
+        "location": "multiselect", 
+        "storage": "text",
+        "light_sensitive": "multiselect",
+        "date": "date",          
+        "status.tube": "multiselect", 
+        "status.reorder": "multiselect",
+        "status.last_checked": "date",
+        "notes": "-"
+    },
+    "sirnas": {
+        "gene": "text",
+        "sirna_name": "text",
+        "species": "text",
+        "sequence": "text",
+        "company": "multiselect",
+        "catalog_id": "text",
+        "efficiency": "text",
+        "time": "text",
+        "notes": "-",
+        "location": "multiselect",
+        "date": "date",
+        "status.tube": "multiselect",
+        "status.reorder": "multiselect",
+        "status.last_checked": "date"
     },
     "experiments": {
         "experiment_name": "text",
@@ -228,6 +283,9 @@ IGNORE_FILTER_COLUMNS = {
     "antibodies": ["source_file", "website", "notes"],
     "cell_lines": ["source_file", "publication", "notes"],
     "plasmids": ["source_file", "website", "notes"],
+    "dyes": ["source_file", "website", "notes"],
+    "inhibitors": ["source_file", "website", "notes"],
+    "sirnas": ["source_file", "notes"],
     "experiments": ["lab_chronicle_version", "location", "experiment_description"],
     "publications": ["publication_id"]
 }
@@ -237,8 +295,11 @@ temp_mobile_config = {
     "cell_lines":      ["cell_line_name", "modifications"],
     "plasmids":        ["plasmid_name", "location"],
     "animal_models":   ["model_name", "organism"],
+    "dyes":            ["dye_name", "location"],
+    "inhibitors":      ["compound", "location"],
+    "sirnas":          ["sirna_name", "location"],
     "experiments": [
-        "experiment_name"
+        "experiment_name",
         "date_started",
         "performed_by",
         "device_name",
@@ -262,6 +323,9 @@ PRETTY_DATABASES = {
     "cell_lines": "Cell Lines",
     "plasmids": "Plasmids",
     "animal_models": "Animal Models",
+    "dyes": "Dyes",
+    "inhibitors": "Inhibitors",
+    "sirnas": "siRNAs",
     "experiments": "Experiments",
     "publications": "Publications"
 }
@@ -283,6 +347,12 @@ def prettify_col(col: str) -> str:
         "publication": "Publication DOI",
         "model_name": "Model Name",
         "catalogue_number": "Catalogue #",
+        # Dye related
+        # Inhibitor related
+        "cas": "CAS Number",
+        # siRNA related
+        "sirna_name": "siRNA Name",
+        # General
         "status.tube": "Tube's status",
         "status.reorder": "Reorder?",
         "status.last_checked": "Last Time Checked",
@@ -332,21 +402,22 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
 
     if dataset == "experiments":
         database_file = database_folder / "experiment_database.yaml"
-        database = yaml.safe_load(database_file.read_text()) or {}
+        if database_file.exists():
+            database = yaml.safe_load(database_file.read_text())
 
-        for hard_drive_idx, hard_drive_info in database.items():
-            hard_drive_file = database_folder / hard_drive_idx / "drive_metadata.yaml"
-            hard_drive_content = yaml.safe_load(hard_drive_file.read_text()) or {}
-            for exp_idx, exp_metadata in hard_drive_content["experiments"].items():
-                exp_info = extract_experiment_info(database_folder / hard_drive_idx / exp_idx,
-                                                   experiment_id=exp_idx, 
-                                                   experiment_info=exp_metadata,
-                                                   hard_drive_id=hard_drive_idx, 
-                                                   hard_drive_info=hard_drive_content.get("hard_drive_info", {}))
-                exp_info.update({k:v for k,v in exp_metadata.items() if k not in ["experiment_checksum"]})  # Merge dictionaries
-                exp_info.update({k:v for k,v in hard_drive_info.items() if k not in ["physical_serial_number", 
-                                                                                    "volume_serial_number"]})  # Merge dictionaries
-                records.append(exp_info)
+            for hard_drive_idx, hard_drive_info in database.items():
+                hard_drive_file = database_folder / hard_drive_idx / "drive_metadata.yaml"
+                hard_drive_content = yaml.safe_load(hard_drive_file.read_text()) or {}
+                for exp_idx, exp_metadata in hard_drive_content["experiments"].items():
+                    exp_info = extract_experiment_info(database_folder / hard_drive_idx / exp_idx,
+                                                    experiment_id=exp_idx, 
+                                                    experiment_info=exp_metadata,
+                                                    hard_drive_id=hard_drive_idx, 
+                                                    hard_drive_info=hard_drive_content.get("hard_drive_info", {}))
+                    exp_info.update({k:v for k,v in exp_metadata.items() if k not in ["experiment_checksum"]})  # Merge dictionaries
+                    exp_info.update({k:v for k,v in hard_drive_info.items() if k not in ["physical_serial_number", 
+                                                                                        "volume_serial_number"]})  # Merge dictionaries
+                    records.append(exp_info)
     elif dataset == "publications":
         for publication_path in database_folder.iterdir():
             for stage_path in publication_path.iterdir():
@@ -382,20 +453,39 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
                     # Call the new flatten_antibody function
                     rec = flatten_antibody(entry.copy(), tgt, file.name)
                     records.append(rec)
+            elif dataset == "dyes":
+                tgt = raw.get("dye_target","")
+                for entry in raw.get("dyes", []):
+                    # Call the new flatten_dye function
+                    rec = flatten_dye(entry.copy(), tgt, file.name)
+                    records.append(rec)
+            elif dataset == "sirnas":
+                tgt = raw.get("gene","")
+                for entry in raw.get("sirnas", []):
+                    # Call the new flatten_sirna function
+                    rec = flatten_sirna(entry.copy(), tgt, file.name)
+                    records.append(rec)
             else:
-                entries = (
-                    raw.get("models", []) if dataset=="animal_models"
-                    else raw if isinstance(raw, list)
-                    else raw.get("plasmids", raw)
-                )
-                for entry in entries:
-                    rec = {}
+                # Determine which entries to process based on the dataset type
+                if dataset == "plasmids" or dataset == "animal_models":
+                    if dataset == "plasmids":
+                        entries = raw.get("plasmids", raw)
+                    elif dataset == "animal_models":
+                        entries = raw.get("models", [])
+
+                    for entry in entries:
+                        rec = {}
+
+                        if dataset=="plasmids":
+                            rec = flatten_plasmid(entry, file.name)
+                        elif dataset=="animal_models":
+                            rec = flatten_animal_model({**entry, "organism": raw.get("organism",file.stem)}, file.name)
+                        records.append(rec)
+                else:
                     if dataset=="cell_lines":
-                        rec = flatten_cell_line(raw, file.name)
-                    elif dataset=="plasmids":
-                        rec = flatten_plasmid(entry, file.name)
-                    elif dataset=="animal_models":
-                        rec = flatten_animal_model({**entry, "organism": raw.get("organism",file.stem)}, file.name)
+                        rec = flatten_cell_line(raw.copy(), file.name)
+                    elif dataset=="inhibitors":
+                        rec = flatten_inhibitor(raw.copy(), file.name)
                     records.append(rec)
     df = pd.DataFrame(records)
     return df
@@ -509,7 +599,7 @@ def flatten_antibody(d, target, src):
 
 
 def flatten_cell_line(d, src):
-    h = d.get("history",{}) or {}
+    h = d.get("history",{})
     mod = "; ".join(f"{m['category'].capitalize()}: {m['description']}"
                      for m in d.get("modifications",[]))
     res = ", ".join(d.get("resistance",[])) if isinstance(d.get("resistance",[]),list) else d.get("resistance","")
@@ -569,6 +659,83 @@ def flatten_animal_model(d, src):
     else:
         d["website"] = html.escape(str(web))
     return {**d, "source_file": src}
+
+def flatten_dye(d, target, src):
+    """Flattens dye data, specifically handling status and website fields."""
+    d["dye_target"] = target
+    d["source_file"] = src
+    
+    # If 'status' is a dictionary, flatten it into a string without bolding its internal keys.
+    if isinstance(d.get("status"), dict):
+        # Expand the status dictionary
+        for k,v in d["status"].items():
+            d[f"status.{k}"] = v
+        # Pop the original status field
+        d.pop("status", None)
+
+    # For dyes, ensure website is handled as a raw URL similar to other flatten functions
+    web = d.get("website", "")
+    if isinstance(web, str) and web.startswith("http"):
+        d["website"] = web
+    else:
+        d["website"] = html.escape(str(web))
+    return d
+
+def flatten_inhibitor(d, src):
+    d["source_file"] = src
+
+    aliases = d.get("aliases","")
+    aliases = ", ".join(aliases) if isinstance(aliases, list) else aliases
+    d["aliases"] = aliases
+
+    web = d.get("website", "")
+    if isinstance(web, str) and web.startswith("http"):
+        d["website"] = web
+    else:
+        d["website"] = html.escape(str(web))
+
+    target_list = d.get("targets",[])
+    targets = []
+    for target in target_list:
+        # Get the name of the target and store the rest as strings
+        name = target.get("name","")
+        for k,v in target.items():
+            if k != "name":
+                name += f"; {k}: {v}"
+        targets.append(name)
+    targets = ", ".join(targets)
+    d["targets"] = targets
+
+    # If 'status' is a dictionary, flatten it into a string without bolding its internal keys.
+    if isinstance(d.get("status"), dict):
+        # Expand the status dictionary
+        for k,v in d["status"].items():
+            d[f"status.{k}"] = v
+        # Pop the original status field
+        d.pop("status", None)
+
+    return d
+
+def flatten_sirna(d, target, src):
+    """Flattens sirna data, specifically handling status and website fields."""
+    d["gene"] = target
+    d["source_file"] = src
+
+    # If 'status' is a dictionary, flatten it into a string without bolding its internal keys.
+    if isinstance(d.get("status"), dict):
+        # Expand the status dictionary
+        for k,v in d["status"].items():
+            d[f"status.{k}"] = v
+        # Pop the original status field
+        d.pop("status", None)
+
+    # For sirnas, ensure website is handled as a raw URL similar to other flatten functions
+    web = d.get("website", "")
+    if isinstance(web, str) and web.startswith("http"):
+        d["website"] = web
+    else:
+        d["website"] = html.escape(str(web))
+    return d
 
 # ─── GIT CLONE HELPER ────────────────────────────────────────────────────────
 def clone_repo(repo_url: str, private: bool, token: str) -> Optional[Path]:
@@ -918,7 +1085,7 @@ else:
 
     # --- Detail Card ---
     # Moved the detail card selection to only appear when data is available
-    if not filtered_df.empty:
+    if not df.empty and not filtered_df.empty:
         st.divider() # Use a divider for better separation
         
         # Use st.expander for a cleaner detail card display
