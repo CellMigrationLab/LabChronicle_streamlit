@@ -144,7 +144,7 @@ def df_to_pdf(df):
 # ─── CONFIGS ────────────────────────────────────────────────────────────────
 DESKTOP_CONFIG = {
     "animal_models": {
-        "model_name": "text",
+        "animal_model_name": "text",
         "organism": "multiselect",
         "background": "text",
         "strain": "text",
@@ -294,7 +294,7 @@ temp_mobile_config = {
     "antibodies":      ["antibody_target", "antibody_name", "location"],
     "cell_lines":      ["cell_line_name", "modifications"],
     "plasmids":        ["plasmid_name", "location"],
-    "animal_models":   ["model_name", "organism"],
+    "animal_models":   ["animal_model_name", "organism"],
     "dyes":            ["dye_name", "location"],
     "small_molecules":      ["compound", "location"],
     "sirnas":          ["sirna_name", "location"],
@@ -345,7 +345,7 @@ def prettify_col(col: str) -> str:
         "expression_host": "Expression Host",
         "publications": "Publication DOI(s)",
         "publication": "Publication DOI",
-        "model_name": "Model Name",
+        "animal_model_name": "Model Name",
         "catalogue_number": "Catalogue #",
         # Dye related
         # Small Molecule related
