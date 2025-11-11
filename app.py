@@ -220,7 +220,7 @@ DESKTOP_CONFIG = {
         "status.last_checked": "date",
         "notes": "-"
     },
-    "inhibitors": {
+    "small_molecules": {
         "compound": "text",
         "company": "multiselect",
         "aliases": "text",
@@ -284,7 +284,7 @@ IGNORE_FILTER_COLUMNS = {
     "cell_lines": ["source_file", "publication", "notes"],
     "plasmids": ["source_file", "website", "notes"],
     "dyes": ["source_file", "website", "notes"],
-    "inhibitors": ["source_file", "website", "notes"],
+    "small_molecules": ["source_file", "website", "notes"],
     "sirnas": ["source_file", "notes"],
     "experiments": ["lab_chronicle_version", "location", "experiment_description"],
     "publications": ["publication_id"]
@@ -296,7 +296,7 @@ temp_mobile_config = {
     "plasmids":        ["plasmid_name", "location"],
     "animal_models":   ["model_name", "organism"],
     "dyes":            ["dye_name", "location"],
-    "inhibitors":      ["compound", "location"],
+    "small_molecules":      ["compound", "location"],
     "sirnas":          ["sirna_name", "location"],
     "experiments": [
         "experiment_name",
@@ -324,7 +324,7 @@ PRETTY_DATABASES = {
     "plasmids": "Plasmids",
     "animal_models": "Animal Models",
     "dyes": "Dyes",
-    "inhibitors": "Inhibitors",
+    "small_molecules": "Small Molecules",
     "sirnas": "siRNAs",
     "experiments": "Experiments",
     "publications": "Publications"
@@ -348,7 +348,7 @@ def prettify_col(col: str) -> str:
         "model_name": "Model Name",
         "catalogue_number": "Catalogue #",
         # Dye related
-        # Inhibitor related
+        # Small Molecule related
         "cas": "CAS Number",
         # siRNA related
         "sirna_name": "siRNA Name",
@@ -484,8 +484,8 @@ def load_dataset(dataset: str, database_root_path: Path) -> pd.DataFrame:
                 else:
                     if dataset=="cell_lines":
                         rec = flatten_cell_line(raw.copy(), file.name)
-                    elif dataset=="inhibitors":
-                        rec = flatten_inhibitor(raw.copy(), file.name)
+                    elif dataset=="small_molecules":
+                        rec = flatten_small_molecule(raw.copy(), file.name)
                     records.append(rec)
     df = pd.DataFrame(records)
     return df
@@ -681,7 +681,7 @@ def flatten_dye(d, target, src):
         d["website"] = html.escape(str(web))
     return d
 
-def flatten_inhibitor(d, src):
+def flatten_small_molecule(d, src):
     d["source_file"] = src
 
     aliases = d.get("aliases","")
