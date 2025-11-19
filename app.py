@@ -11,6 +11,7 @@ from io import BytesIO
 import pandas as pd
 import urllib.parse
 import subprocess
+import datetime
 import tempfile
 import requests
 import yaml
@@ -182,7 +183,8 @@ DESKTOP_CONFIG = {
         "source": "text",
         "catalog_id": "text",
         "publication": "text",
-        "authentication": "text"
+        "authentication": "text",
+        "storage.location": "multiselect",
     },
     "plasmids": {
         "plasmid_name": "text",
@@ -194,7 +196,7 @@ DESKTOP_CONFIG = {
         "website": "-",
         "expression_host": "text",
         "sequencing_validation": "text",
-        "location": "text",
+        "location": "multiselect",
         "notes": "text",
         "status": "text",
         "MTA": "text",
@@ -213,7 +215,7 @@ DESKTOP_CONFIG = {
         "solvent": "text",
         "stock_concentration": "text",
         "working_concentration": "text",
-        "location": "text",
+        "location": "multiselect",
         "date": "date",
         "status.tube": "multiselect",
         "status.reorder": "multiselect",
@@ -352,6 +354,8 @@ def prettify_col(col: str) -> str:
         "cas": "CAS Number",
         # siRNA related
         "sirna_name": "siRNA Name",
+        # Cell Line related
+        "storage.location": "Location",
         # General
         "status.tube": "Tube's status",
         "status.reorder": "Reorder?",
@@ -383,6 +387,24 @@ def pretty_val(v: Any) -> Any:
     if isinstance(v, list):
         return ", ".join(map(str, v))
     return v
+
+# ─── Location related functions ─────────────────────────────────────────────────────
+
+def load_boxes(boxes_file: Path) -> Dict[str, Any]:
+    """Load boxes YAML file into a dictionary."""
+    if not boxes_file.exists():
+        return {}
+    boxes_data = yaml.safe_load(boxes_file.read_text()) or {}
+
+    assert "boxes" in boxes_data, "Invalid boxes.yaml format: missing 'boxes' key."
+
+    processed_boxes_data = {}
+    for box in boxes_data["boxes"]:
+        box_id = box["Box_ID"]
+        box_name = box.get("Box_name", box_id)
+        processed_boxes_data[box_id] = box_name
+
+    return processed_boxes_data
 
 # ─── YAML → DataFrame LOADER ─────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
@@ -599,28 +621,41 @@ def flatten_antibody(d, target, src):
 
 
 def flatten_cell_line(d, src):
+    
+    storage = d.get("storage",[])
+
     h = d.get("history",{})
     mod = "; ".join(f"{m['category'].capitalize()}: {m['description']}"
                      for m in d.get("modifications",[]))
     res = ", ".join(d.get("resistance",[])) if isinstance(d.get("resistance",[]),list) else d.get("resistance","")
     pub = h.get("publication","")
-    if "/" in pub: pub = f'https://doi.org/{pub}' # Store as raw URL
-    return {
-        "cell_line_name": d.get("cell_line_name",""),
-        "organism": d.get("organism",""),
-        "sex": d.get("sex",""),
-        "tissue": d.get("tissue",""),
-        "type": d.get("type",""),
-        "derived_from": h.get("derived_from",""),
-        "resistance": res,
-        "modifications": mod,
-        "notes": d.get("notes",""),
-        "source": h.get("source",""),
-        "catalog_id": h.get("catalog_id",""),
-        "publication": pub,
-        "authentication": (d.get("authentication") or {}).get("method",""),
-        "source_file": src
+    if "/" in pub: 
+        pub = f'https://doi.org/{pub}' # Store as raw URL
+
+    raw_cell_line = {
+            "cell_line_name": d.get("cell_line_name",""),
+            "organism": d.get("organism",""),
+            "sex": d.get("sex",""),
+            "tissue": d.get("tissue",""),
+            "type": d.get("type",""),
+            "derived_from": h.get("derived_from",""),
+            "resistance": res,
+            "modifications": mod,
+            "notes": d.get("notes",""),
+            "source": h.get("source",""),
+            "catalog_id": h.get("catalog_id",""),
+            "publication": pub,
+            "authentication": (d.get("authentication") or {}).get("method",""),
+            "source_file": src,
+            "storage.location": [],
     }
+
+    for stored_cell_line in storage:
+        location = stored_cell_line.get("location","")
+        if location:
+            raw_cell_line["storage.location"].append(location)
+            
+    return raw_cell_line
 
 def flatten_plasmid(d, src):
     status = ", ".join(f"{k}: {v}" for k, v in (d.get("status") or {}).items())
@@ -825,6 +860,11 @@ else:
     if "repo_url" not in st.session_state:
         st.session_state.repo_url = ""
 
+    if 'boxes_dictionary' not in st.session_state:
+        # Load the boxes database
+        boxes_file = repo_path / "lab_database" / "boxes" / "boxes.yaml"
+        st.session_state.boxes_dictionary = load_boxes(boxes_file)
+    
     # Determine which config to use based on the current mobile_view_checkbox state
     cfg = MOBILE_CONFIG if st.session_state.mobile_view_checkbox else DESKTOP_CONFIG
 
@@ -866,7 +906,11 @@ else:
         st.rerun()
 
     df = load_dataset(ds, repo_path)
-    
+
+    # Check if "location" is among the columns and translate it
+    if "location" in df.columns:
+        df["location"] = df["location"].apply(lambda loc: st.session_state.boxes_dictionary.get(loc, loc))
+
     with st.sidebar:
         st.markdown("## Options")  # Sidebar title
 
